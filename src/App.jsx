@@ -644,7 +644,7 @@ function App() {
             <div className="logo">
               <div className="logo-icon"><img src="./logo.png" alt="Logo" /></div>
               <div className="logo-text">
-                <h1 className="logo-title">USDARK-INDICATOR</h1>
+                <h1 className="logo-title">USDARK-SCAN</h1>
                 <p className="logo-subtitle">Token Analysis & Trading Signals</p>
                 <div className="contract-address">
                   <span className="ca-label">CA: </span>
