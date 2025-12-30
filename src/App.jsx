@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { RefreshCw, ChevronDown, Search, TrendingUp, TrendingDown, ArrowUp, ArrowDown, Minus, Copy } from 'lucide-react';
 import Chart from 'chart.js/auto';
 import 'chartjs-adapter-date-fns';
+import * as THREE from 'three';
 import './App.css';
 
 // Priority tokens
@@ -16,7 +17,7 @@ const PRIORITY_TOKENS = [
   { symbol: 'FARTCOIN', id: 'fartcoin', binanceSymbol: null }
 ];
 
-const CONTRACT_ADDRESS = '4EKDKWJDrqrCQtAD6j9sM5diTeZiKBepkEB8GLP9Dark';
+const CONTRACT_ADDRESS = '3ejk8LXAS9kUC7XhpDGHRjARyUy5qU7PaAq7PMykpump';
 
 const CARD_DEFS = [
   { key: 'openInterest', label: 'OPEN INTEREST', unit: 'All Exchanges', fmt: (v) => fmtUSD(v) },
@@ -32,10 +33,10 @@ const CARD_DEFS = [
 function fmtUSD(v) {
   if (v == null || isNaN(v)) return '--';
   const n = Number(v);
-  if (n >= 1e12) return `$${(n/1e12).toFixed(2)}T`;
-  if (n >= 1e9) return `$${(n/1e9).toFixed(2)}B`;
-  if (n >= 1e6) return `$${(n/1e6).toFixed(2)}M`;
-  if (n >= 1e3) return `$${(n/1e3).toFixed(2)}K`;
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(2)}K`;
   return `$${n.toFixed(2)}`;
 }
 
@@ -196,72 +197,32 @@ async function fetchBinanceTopLSRatio(token, period = '1h', limit = 100) {
   }
 }
 
-// Calculate buy/sell signal based on multiple indicators
 function calculateSignal(priceChange24h, fundingRate, takerRatio, fearGreed) {
   let score = 0;
   let signals = [];
-
-  // Price momentum (30%)
-  if (priceChange24h > 5) {
-    score += 30;
-    signals.push('Strong upward momentum');
-  } else if (priceChange24h > 0) {
-    score += 15;
-    signals.push('Positive momentum');
-  } else if (priceChange24h < -5) {
-    score -= 30;
-    signals.push('Strong downward momentum');
-  } else {
-    score -= 15;
-    signals.push('Negative momentum');
-  }
-
-  // Funding rate (25%)
+  if (priceChange24h > 5) { score += 30; signals.push('Strong upward momentum'); }
+  else if (priceChange24h > 0) { score += 15; signals.push('Positive momentum'); }
+  else if (priceChange24h < -5) { score -= 30; signals.push('Strong downward momentum'); }
+  else if (priceChange24h < 0) { score -= 15; signals.push('Negative momentum'); }
   if (fundingRate != null) {
-    if (fundingRate < -0.01) {
-      score += 25;
-      signals.push('Negative funding (shorts paying longs)');
-    } else if (fundingRate > 0.01) {
-      score -= 25;
-      signals.push('High funding (longs paying shorts)');
-    }
+    if (fundingRate < -0.01) { score += 25; signals.push('Negative funding (shorts paying longs)'); }
+    else if (fundingRate > 0.01) { score -= 25; signals.push('High funding (longs paying shorts)'); }
   }
-
-  // Taker buy/sell ratio (25%)
   if (takerRatio != null) {
-    if (takerRatio > 1.2) {
-      score += 25;
-      signals.push('Strong buying pressure');
-    } else if (takerRatio > 1) {
-      score += 12;
-      signals.push('Moderate buying pressure');
-    } else if (takerRatio < 0.8) {
-      score -= 25;
-      signals.push('Strong selling pressure');
-    } else {
-      score -= 12;
-      signals.push('Moderate selling pressure');
-    }
+    if (takerRatio > 1.2) { score += 25; signals.push('Strong buying pressure'); }
+    else if (takerRatio > 1) { score += 12; signals.push('Moderate buying pressure'); }
+    else if (takerRatio < 0.8) { score -= 25; signals.push('Strong selling pressure'); }
+    else if (takerRatio < 1) { score -= 12; signals.push('Moderate selling pressure'); }
   }
-
-  // Fear & Greed (20%)
   if (fearGreed != null) {
-    if (fearGreed < 25) {
-      score += 20;
-      signals.push('Extreme fear (contrarian buy)');
-    } else if (fearGreed > 75) {
-      score -= 20;
-      signals.push('Extreme greed (contrarian sell)');
-    }
+    if (fearGreed < 25) { score += 20; signals.push('Extreme fear (contrarian buy)'); }
+    else if (fearGreed > 75) { score -= 20; signals.push('Extreme greed (contrarian sell)'); }
   }
-
-  // Determine signal
   let signal = 'NEUTRAL';
   if (score > 40) signal = 'STRONG BUY';
   else if (score > 15) signal = 'BUY';
   else if (score < -40) signal = 'STRONG SELL';
   else if (score < -15) signal = 'SELL';
-
   return { signal, score, signals };
 }
 
@@ -273,16 +234,13 @@ async function fetchMarketMetrics(token) {
     fetchBinanceGlobalLSRatio(token, '1h', 100),
     fetchBinanceTopLSRatio(token, '1h', 100)
   ]);
-
   const funding = fundingHist ? {
     timeseries: fundingHist,
     current: fundingHist[fundingHist.length - 1]?.rate
   } : { timeseries: [], current: null };
-
   const taker = takerRaw && Array.isArray(takerRaw) && takerRaw.length
     ? { timeseries: takerRaw }
     : { timeseries: [] };
-
   return {
     oi: oiCurrent,
     funding,
@@ -303,7 +261,9 @@ function App() {
   const [priceData, setPriceData] = useState({ price: null, change: null });
   const [signal, setSignal] = useState(null);
   const [copied, setCopied] = useState(false);
-  
+  const [preloaderActive, setPreloaderActive] = useState(true);
+  const [progress, setProgress] = useState(0);
+
   const chartsRef = useRef({});
   const canvasRefs = {
     ohlc: useRef(null),
@@ -312,6 +272,9 @@ function App() {
     fg: useRef(null),
     funding: useRef(null)
   };
+
+  const matrixRef = useRef(null);
+  const bgCanvasRef = useRef(null);
 
   const displayTokens = searchQuery.length > 0 ? searchResults : PRIORITY_TOKENS;
 
@@ -325,6 +288,23 @@ function App() {
     }
   };
 
+  // Preloader progress simulation
+  useEffect(() => {
+    if (!preloaderActive) return;
+    let currentProgress = 0;
+    const interval = setInterval(() => {
+      currentProgress += Math.random() * 8 + 2;
+      if (currentProgress > 100) currentProgress = 100;
+      setProgress(Math.floor(currentProgress));
+      if (currentProgress >= 100) {
+        clearInterval(interval);
+        setTimeout(() => setPreloaderActive(false), 500);
+      }
+    }, 80);
+    return () => clearInterval(interval);
+  }, [preloaderActive]);
+
+  // Token search
   useEffect(() => {
     const searchTimer = setTimeout(async () => {
       if (searchQuery.length > 1) {
@@ -336,171 +316,208 @@ function App() {
         setSearchResults([]);
       }
     }, 500);
-
     return () => clearTimeout(searchTimer);
   }, [searchQuery]);
 
+  // Init charts and fetch data after preloader
   useEffect(() => {
+    if (preloaderActive) return;
     initCharts();
     fetchAndRenderAll(currentToken);
-    
     return () => {
-      Object.values(chartsRef.current).forEach(chart => {
-        if (chart) chart.destroy();
-      });
+      Object.values(chartsRef.current).forEach(chart => chart?.destroy());
     };
-  }, []);
+  }, [preloaderActive]);
 
   useEffect(() => {
+    if (preloaderActive) return;
     fetchAndRenderAll(currentToken);
   }, [currentToken]);
 
+  // Matrix Rain + 3D Grid Background
+  useEffect(() => {
+    if (preloaderActive || typeof window === 'undefined') return;
+
+    let matrixInterval;
+    let animationId;
+    let renderer, scene, camera, grid, nodes;
+
+    // Matrix Rain
+    const matrixCanvas = matrixRef.current;
+    if (matrixCanvas) {
+      const ctx = matrixCanvas.getContext('2d');
+      const resize = () => {
+        matrixCanvas.width = window.innerWidth;
+        matrixCanvas.height = window.innerHeight;
+      };
+      resize();
+
+      const fontSize = 16;
+      let columns = Math.floor(matrixCanvas.width / fontSize);
+      const drops = Array(columns).fill(1);
+      const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
+      const draw = () => {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+        ctx.fillRect(0, 0, matrixCanvas.width, matrixCanvas.height);
+        ctx.fillStyle = '#0f0';
+        ctx.font = `${fontSize}px monospace`;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#0f0';
+
+        for (let i = 0; i < drops.length; i++) {
+          const char = chars[Math.floor(Math.random() * chars.length)];
+          const x = i * fontSize;
+          const y = drops[i] * fontSize;
+          ctx.fillText(char, x, y);
+          if (y > matrixCanvas.height && Math.random() > 0.975) drops[i] = 0;
+          drops[i]++;
+        }
+      };
+
+      matrixInterval = setInterval(draw, 35);
+      window.addEventListener('resize', () => {
+        resize();
+        columns = Math.floor(matrixCanvas.width / fontSize);
+      });
+    }
+
+    // THREE.js Grid + Nodes
+    const bgCanvas = bgCanvasRef.current;
+    if (bgCanvas) {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, -2, 10);
+      camera.lookAt(0, 0, 0);
+
+      renderer = new THREE.WebGLRenderer({ canvas: bgCanvas, alpha: true, antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+      const gridHelper = new THREE.GridHelper(30, 50, 0x00ff00, 0x003300);
+      gridHelper.rotation.x = Math.PI / 2;
+      gridHelper.position.z = -5;
+      scene.add(gridHelper);
+
+      grid = new THREE.LineSegments(
+        new THREE.WireframeGeometry(new THREE.PlaneGeometry(40, 40, 64, 64)),
+        new THREE.LineBasicMaterial({ color: 0x00ff41, transparent: true, opacity: 0.3 })
+      );
+      grid.rotation.x = -Math.PI / 2;
+      grid.position.z = -8;
+      scene.add(grid);
+
+      const nodeGeometry = new THREE.SphereGeometry(0.15, 16, 16);
+      const nodeMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+      nodes = new THREE.Group();
+      for (let i = 0; i < 80; i++) {
+        const node = new THREE.Mesh(nodeGeometry, nodeMaterial);
+        node.position.set(
+          (Math.random() - 0.5) * 30,
+          (Math.random() - 0.5) * 20,
+          (Math.random() - 0.5) * 15 - 5
+        );
+        nodes.add(node);
+      }
+      scene.add(nodes);
+
+      const ambient = new THREE.AmbientLight(0x00ff41, 0.4);
+      scene.add(ambient);
+
+      const animate = () => {
+        animationId = requestAnimationFrame(animate);
+        grid.rotation.z += 0.001;
+        nodes.rotation.y += 0.002;
+        nodes.rotation.x += 0.001;
+        renderer.render(scene, camera);
+      };
+      animate();
+
+      const onResize = () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      };
+      window.addEventListener('resize', onResize);
+    }
+
+    return () => {
+      if (matrixInterval) clearInterval(matrixInterval);
+      if (animationId) cancelAnimationFrame(animationId);
+      if (renderer) renderer.dispose();
+    };
+  }, [preloaderActive]);
+
   const defaultOptions = (yLabel = '') => ({
     responsive: true,
-    maintainAspectRatio: true,
-    aspectRatio: 1.5,
+    maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
     scales: {
       x: {
         type: 'time',
         time: { unit: 'day', tooltipFormat: 'MMM dd' },
-        grid: { display: false, color: 'rgba(0,0,0,0.05)' },
-        ticks: { color: '#333' }
+        grid: { color: 'rgba(0, 255, 0, 0.1)' },
+        ticks: { color: '#0f0' }
       },
       y: {
-        grid: { color: 'rgba(0,0,0,0.05)' },
-        ticks: { color: '#333' },
-        title: { display: !!yLabel, text: yLabel, color: '#000' }
+        grid: { color: 'rgba(0, 255, 0, 0.1)' },
+        ticks: { color: '#0f0' },
+        title: { display: !!yLabel, text: yLabel, color: '#0f0' }
       }
     },
     plugins: {
-      legend: { 
-        display: true, 
-        position: 'bottom', 
-        labels: { color: '#000', usePointStyle: true, font: { family: 'Orbitron' } } 
-      },
-      tooltip: { mode: 'index' }
+      legend: { labels: { color: '#0f0' } },
+      tooltip: {
+        backgroundColor: 'rgba(0, 0, 0, 0.9)',
+        titleColor: '#0f0',
+        bodyColor: '#0f0',
+        borderColor: '#0f0',
+        borderWidth: 1
+      }
     }
   });
 
   const initCharts = () => {
+    const neon = '#0f0';
     if (canvasRefs.ohlc.current) {
-      const ctx = canvasRefs.ohlc.current.getContext('2d');
-      chartsRef.current.ohlc = new Chart(ctx, {
+      chartsRef.current.ohlc = new Chart(canvasRefs.ohlc.current.getContext('2d'), {
         type: 'line',
         data: {
-          labels: [],
-          datasets: [{
-            label: 'High',
-            data: [],
-            borderColor: '#000',
-            backgroundColor: 'rgba(0, 0, 0, 0.05)',
-            borderWidth: 2,
-            tension: 0.2,
-            pointRadius: 0,
-            fill: false
-          }, {
-            label: 'Low',
-            data: [],
-            borderColor: '#666',
-            backgroundColor: 'rgba(102, 102, 102, 0.05)',
-            borderWidth: 2,
-            tension: 0.2,
-            pointRadius: 0,
-            fill: false
-          }, {
-            label: 'Close',
-            data: [],
-            borderColor: '#333',
-            borderWidth: 3,
-            tension: 0.2,
-            pointRadius: 0,
-            fill: false
-          }]
+          labels: [], datasets: [
+            { label: 'High', data: [], borderColor: neon, borderWidth: 2, tension: 0.3, pointRadius: 0 },
+            { label: 'Low', data: [], borderColor: '#008800', borderWidth: 2, tension: 0.3, pointRadius: 0 },
+            { label: 'Close', data: [], borderColor: neon, borderWidth: 4, tension: 0.3, pointRadius: 0 }
+          ]
         },
         options: defaultOptions('Price (USD)')
       });
     }
-
+    // ... (other charts - volume, taker, fg, funding - same style)
     if (canvasRefs.volume.current) {
-      const ctx = canvasRefs.volume.current.getContext('2d');
-      const options = defaultOptions('Volume (USD)');
-      options.scales.y.ticks.callback = (value) => fmtUSD(value);
-      chartsRef.current.volume = new Chart(ctx, {
+      chartsRef.current.volume = new Chart(canvasRefs.volume.current.getContext('2d'), {
         type: 'bar',
-        data: {
-          labels: [],
-          datasets: [{
-            label: 'Volume',
-            data: [],
-            backgroundColor: 'rgba(0, 0, 0, 0.2)',
-            borderColor: '#000',
-            borderWidth: 1
-          }]
-        },
-        options
+        data: { labels: [], datasets: [{ label: 'Volume', data: [], backgroundColor: 'rgba(0, 255, 0, 0.4)', borderColor: neon }] },
+        options: { ...defaultOptions('Volume'), scales: { y: { ticks: { callback: fmtUSD } } } }
       });
     }
-
     if (canvasRefs.buySell.current) {
-      const ctx = canvasRefs.buySell.current.getContext('2d');
-      chartsRef.current.buySell = new Chart(ctx, {
+      chartsRef.current.buySell = new Chart(canvasRefs.buySell.current.getContext('2d'), {
         type: 'line',
-        data: {
-          labels: [],
-          datasets: [{
-            label: 'Buy/Sell Ratio',
-            data: [],
-            borderColor: '#000',
-            backgroundColor: 'rgba(0, 0, 0, 0.1)',
-            borderWidth: 3,
-            tension: 0.2,
-            pointRadius: 0,
-            fill: true
-          }]
-        },
-        options: defaultOptions('Taker Buy Ratio')
+        data: { labels: [], datasets: [{ label: 'Taker Buy/Sell Ratio', data: [], borderColor: neon, borderWidth: 4, fill: true }] },
+        options: defaultOptions('Ratio')
       });
     }
-
     if (canvasRefs.fg.current) {
-      const ctx = canvasRefs.fg.current.getContext('2d');
-      chartsRef.current.fg = new Chart(ctx, {
+      chartsRef.current.fg = new Chart(canvasRefs.fg.current.getContext('2d'), {
         type: 'line',
-        data: {
-          labels: [],
-          datasets: [{
-            label: 'Fear & Greed',
-            data: [],
-            borderColor: '#000',
-            backgroundColor: 'rgba(0, 0, 0, 0.1)',
-            borderWidth: 3,
-            tension: 0.2,
-            pointRadius: 0,
-            fill: true
-          }]
-        },
-        options: defaultOptions('Index Value')
+        data: { labels: [], datasets: [{ label: 'Fear & Greed', data: [], borderColor: neon, borderWidth: 4, fill: true }] },
+        options: defaultOptions('Index')
       });
     }
-
     if (canvasRefs.funding.current) {
-      const ctx = canvasRefs.funding.current.getContext('2d');
-      chartsRef.current.funding = new Chart(ctx, {
+      chartsRef.current.funding = new Chart(canvasRefs.funding.current.getContext('2d'), {
         type: 'line',
-        data: {
-          labels: [],
-          datasets: [{
-            label: 'Funding Rate',
-            data: [],
-            borderColor: '#000',
-            backgroundColor: 'rgba(0, 0, 0, 0.1)',
-            borderWidth: 3,
-            tension: 0.2,
-            pointRadius: 0,
-            fill: true
-          }]
-        },
+        data: { labels: [], datasets: [{ label: 'Funding Rate (%)', data: [], borderColor: neon, borderWidth: 4, fill: true }] },
         options: defaultOptions('Funding Rate (%)')
       });
     }
@@ -517,22 +534,13 @@ function App() {
         fetchMarketMetrics(token)
       ]);
 
-      // Always prioritize getting price from available data
-      let currentPrice = null;
-      if (market?.market_data?.current_price?.usd) {
-        currentPrice = market.market_data.current_price.usd;
-      } else if (ohlc && ohlc.length > 0) {
-        currentPrice = ohlc[ohlc.length - 1][4]; // Use close price from OHLC
-      }
-
-      // Calculate 24h change from OHLC if market data unavailable
+      let currentPrice = market?.market_data?.current_price?.usd ?? (ohlc?.[ohlc.length - 1]?.[4] ?? null);
       let priceChange24h = market?.market_data?.price_change_percentage_24h ?? null;
       if (priceChange24h === null && ohlc && ohlc.length >= 2) {
-        const latestPrice = ohlc[ohlc.length - 1][4];
-        const price24hAgo = ohlc[ohlc.length - 2][4];
-        priceChange24h = ((latestPrice - price24hAgo) / price24hAgo) * 100;
+        const latest = ohlc[ohlc.length - 1][4];
+        const prev = ohlc[ohlc.length - 2][4];
+        priceChange24h = ((latest - prev) / prev) * 100;
       }
-
       const priceChange7d = market?.market_data?.price_change_percentage_7d ?? null;
       const volume24h = market?.market_data?.total_volume?.usd ?? null;
       const marketCap = market?.market_data?.market_cap?.usd ?? null;
@@ -540,84 +548,65 @@ function App() {
       setPriceData({ price: currentPrice, change: priceChange24h });
 
       const fundingCurrent = metrics.funding?.current ?? null;
-      const fgLast = fg && fg.length ? fg[fg.length - 1].value : null;
-      const takerLast = metrics.taker?.timeseries?.length > 0 ? metrics.taker.timeseries[metrics.taker.timeseries.length - 1].value : null;
+      const fgLast = fg?.[fg.length - 1]?.value ?? null;
+      const takerLast = metrics.taker?.timeseries?.[metrics.taker.timeseries.length - 1]?.value ?? null;
 
-      // Calculate trading signal
       const tradingSignal = calculateSignal(priceChange24h, fundingCurrent, takerLast, fgLast);
       setSignal(tradingSignal);
 
       setCardData({
-        openInterest: { value: metrics.oi, delta: null },
-        fundingRate: { value: fundingCurrent, delta: null },
-        longShort: { value: metrics.longShortRatio, delta: null },
-        topTraders: { value: metrics.topTradersRatio, delta: null },
-        fearGreed: { value: fgLast, delta: null },
-        volume24h: { value: volume24h, delta: null },
-        marketCap: { value: marketCap, delta: null },
-        priceChange7d: { value: priceChange7d, delta: null }
+        openInterest: { value: metrics.oi },
+        fundingRate: { value: fundingCurrent },
+        longShort: { value: metrics.longShortRatio },
+        topTraders: { value: metrics.topTradersRatio },
+        fearGreed: { value: fgLast },
+        volume24h: { value: volume24h },
+        marketCap: { value: marketCap },
+        priceChange7d: { value: priceChange7d }
       });
 
-      renderOHLC(ohlc);
-      renderVolumeHistory(marketChart);
-      renderTakerRatio(metrics.taker);
-      renderFearGreed(fg);
-      renderFunding(metrics.funding);
+      // Render charts
+      if (ohlc && chartsRef.current.ohlc) {
+        const labels = ohlc.map(r => new Date(r[0]));
+        chartsRef.current.ohlc.data.labels = labels;
+        chartsRef.current.ohlc.data.datasets[0].data = ohlc.map(r => ({ x: new Date(r[0]), y: r[2] }));
+        chartsRef.current.ohlc.data.datasets[1].data = ohlc.map(r => ({ x: new Date(r[0]), y: r[3] }));
+        chartsRef.current.ohlc.data.datasets[2].data = ohlc.map(r => ({ x: new Date(r[0]), y: r[4] }));
+        chartsRef.current.ohlc.update();
+      }
 
+      if (marketChart?.total_volumes && chartsRef.current.volume) {
+        const vols = marketChart.total_volumes;
+        chartsRef.current.volume.data.labels = vols.map(v => new Date(v[0]));
+        chartsRef.current.volume.data.datasets[0].data = vols.map(v => v[1]);
+        chartsRef.current.volume.update();
+      }
+
+      if (metrics.taker?.timeseries && chartsRef.current.buySell) {
+        const data = metrics.taker.timeseries.map(s => ({ x: new Date(s.ts), y: s.value }));
+        chartsRef.current.buySell.data.labels = data.map(d => d.x);
+        chartsRef.current.buySell.data.datasets[0].data = data;
+        chartsRef.current.buySell.update();
+      }
+
+      if (fg && chartsRef.current.fg) {
+        const data = fg.map(s => ({ x: new Date(s.ts), y: s.value }));
+        chartsRef.current.fg.data.labels = data.map(d => d.x);
+        chartsRef.current.fg.data.datasets[0].data = data;
+        chartsRef.current.fg.update();
+      }
+
+      if (metrics.funding?.timeseries && chartsRef.current.funding) {
+        const data = metrics.funding.timeseries.map(s => ({ x: new Date(s.ts), y: (s.rate ?? 0) * 100 }));
+        chartsRef.current.funding.data.labels = data.map(d => d.x);
+        chartsRef.current.funding.data.datasets[0].data = data;
+        chartsRef.current.funding.update();
+      }
     } catch (err) {
       console.error('fetchAndRenderAll failed', err);
     } finally {
       setLoading(false);
     }
-  };
-
-  const renderOHLC = (raw) => {
-    if (!raw || !raw.length || !chartsRef.current.ohlc) return;
-    const labels = raw.map(r => new Date(r[0]));
-    chartsRef.current.ohlc.data.labels = labels;
-    chartsRef.current.ohlc.data.datasets[0].data = raw.map(r => ({ x: new Date(r[0]), y: r[2] }));
-    chartsRef.current.ohlc.data.datasets[1].data = raw.map(r => ({ x: new Date(r[0]), y: r[3] }));
-    chartsRef.current.ohlc.data.datasets[2].data = raw.map(r => ({ x: new Date(r[0]), y: r[4] }));
-    chartsRef.current.ohlc.update();
-  };
-
-  const renderVolumeHistory = (raw) => {
-    if (!chartsRef.current.volume) return;
-    if (raw && raw.total_volumes && raw.total_volumes.length) {
-      const volumes = raw.total_volumes;
-      chartsRef.current.volume.data.labels = volumes.map(v => new Date(v[0]));
-      chartsRef.current.volume.data.datasets[0].data = volumes.map(v => v[1]);
-    } else {
-      chartsRef.current.volume.data.labels = [];
-      chartsRef.current.volume.data.datasets[0].data = [];
-    }
-    chartsRef.current.volume.update();
-  };
-
-  const renderTakerRatio = (takerData) => {
-    if (!chartsRef.current.buySell) return;
-    const series = takerData?.timeseries || [];
-    const data = series.map(s => ({ x: new Date(s.ts), y: s.value }));
-    chartsRef.current.buySell.data.labels = data.map(d => d.x);
-    chartsRef.current.buySell.data.datasets[0].data = data;
-    chartsRef.current.buySell.update();
-  };
-
-  const renderFearGreed = (series) => {
-    if (!chartsRef.current.fg) return;
-    const data = series && series.length ? series.map(s => ({ x: new Date(s.ts), y: s.value })) : [];
-    chartsRef.current.fg.data.labels = data.map(d => d.x);
-    chartsRef.current.fg.data.datasets[0].data = data;
-    chartsRef.current.fg.update();
-  };
-
-  const renderFunding = (funding) => {
-    if (!chartsRef.current.funding) return;
-    const series = funding?.timeseries || [];
-    const data = series.map(s => ({ x: new Date(s.ts), y: (s.rate ?? s.value ?? 0) * 100 }));
-    chartsRef.current.funding.data.labels = data.map(d => d.x);
-    chartsRef.current.funding.data.datasets[0].data = data;
-    chartsRef.current.funding.update();
   };
 
   const getSignalColor = (sig) => {
@@ -630,190 +619,186 @@ function App() {
   };
 
   const getSignalIcon = (sig) => {
-    if (!sig) return <Minus size={24} />;
-    if (sig === 'STRONG BUY' || sig === 'BUY') return <ArrowUp size={24} />;
-    if (sig === 'STRONG SELL' || sig === 'SELL') return <ArrowDown size={24} />;
-    return <Minus size={24} />;
+    if (!sig) return <Minus size={80} />;
+    if (sig.includes('BUY')) return <ArrowUp size={80} />;
+    if (sig.includes('SELL')) return <ArrowDown size={80} />;
+    return <Minus size={80} />;
   };
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="header-content">
-          <div className="logo-section">
-            <div className="logo">
-              <div className="logo-icon"><img src="./logo.png" alt="Logo" /></div>
-              <div className="logo-text">
-                <h1 className="logo-title">USDARK-INDICATOR</h1>
-                <p className="logo-subtitle">Token Analysis & Trading Signals</p>
-                <div className="contract-address">
-                  <span className="ca-label">CA: </span>
-                  <button 
-                    className="ca-copy-btn" 
-                    onClick={handleCopyCA}
-                    title="Copy contract address"
-                  >
-                    <span className="ca-value">{CONTRACT_ADDRESS}</span>
-                    <Copy size={12} className="copy-icon" />
-                    {copied && <span className="copied-feedback">Copied!</span>}
-                  </button>
-                </div>
-              </div>
-            </div>
+    <div className="app-matrix">
+      {preloaderActive && (
+        <div className="preloader">
+          <div className="loader-text glitch">KAIZEN-INDEX</div>
+          <div className="progress-bar">
+            <div className="progress-fill" style={{ width: `${progress}%` }} />
           </div>
-
-          <div className="header-actions">
-            <div className="token-selector">
-              <button 
-                className="token-btn"
-                onClick={() => setDropdownOpen(!dropdownOpen)}
-              >
-                <span>{currentToken.symbol}</span>
-                <ChevronDown size={16} />
-              </button>
-
-              {dropdownOpen && (
-                <>
-                  <div className="dropdown-backdrop" onClick={() => setDropdownOpen(false)} />
-                  <div className="dropdown">
-                    <div className="dropdown-search">
-                      <Search size={16} />
-                      <input
-                        type="text"
-                        placeholder="Search any token..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        autoFocus
-                      />
-                    </div>
-                    <div className="dropdown-list">
-                      {searching && <div className="dropdown-loading">Searching...</div>}
-                      {!searching && displayTokens.map(token => (
-                        <button
-                          key={token.id}
-                          className="dropdown-item"
-                          onClick={() => {
-                            setCurrentToken(token);
-                            setDropdownOpen(false);
-                            setSearchQuery('');
-                          }}
-                        >
-                          <span className="token-symbol">{token.symbol}</span>
-                          <span className="token-id">{token.name || token.id}</span>
-                        </button>
-                      ))}
-                      {!searching && displayTokens.length === 0 && searchQuery.length > 1 && (
-                        <div className="dropdown-empty">No tokens found</div>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="price-display">
-              <div className="price">
-                {priceData.price ? `$${Number(priceData.price).toLocaleString(undefined, {maximumFractionDigits: 6})}` : '--'}
-              </div>
-              {priceData.change != null && (
-                <div className={`price-change ${priceData.change >= 0 ? 'positive' : 'negative'}`}>
-                  {priceData.change >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                  {priceData.change >= 0 ? '+' : ''}{priceData.change.toFixed(2)}%
-                </div>
-              )}
-            </div>
-
-            <button
-              className="refresh-btn"
-              onClick={() => fetchAndRenderAll(currentToken)}
-              disabled={loading}
-            >
-              <RefreshCw size={18} className={loading ? 'spinning' : ''} />
-            </button>
-          </div>
+          <div className="percent">{progress}%</div>
         </div>
-      </header>
+      )}
 
-      <main className="main">
-        {/* Trading Signal */}
-        {signal && (
-          <div className={`signal-card ${getSignalColor(signal.signal)}`}>
-            <div className="signal-icon">
-              {getSignalIcon(signal.signal)}
-            </div>
-            <div className="signal-content">
-              <div className="signal-label">TRADING SIGNAL</div>
-              <div className="signal-value">{signal.signal}</div>
-              <div className="signal-score">Confidence Score: {signal.score}</div>
-              <div className="signal-reasons">
-                {signal.signals.map((s, i) => (
-                  <div key={i} className="signal-reason">• {s}</div>
-                ))}
+      <canvas ref={matrixRef} className="matrix-rain" />
+      <canvas ref={bgCanvasRef} className="bg-grid" />
+      <div className="crt-overlay" />
+
+      <div className={preloaderActive ? 'main-content hidden' : 'main-content'}>
+        <div className="dashboard-container">
+          <header className="header-matrix">
+            <div className="logo-section">
+              <div className="logo">
+                <div className="logo-icon glitch-hover">
+                  <img src="./logo.jpg" alt="KAIZEN-INDEX Logo" />
+                </div>
+                <div className="logo-text">
+                  <h1 className="logo-title glitch">KAIZEN-INDEX</h1>
+                  <p className="logo-subtitle">TOKEN ANALYSIS TERMINAL</p>
+                </div>
               </div>
             </div>
-          </div>
-        )}
 
-        <div className="cards-grid">
-          {CARD_DEFS.map(card => {
-            const data = cardData[card.key] || {};
-            return (
-              <div key={card.key} className={`metric-card ${loading ? 'loading' : ''}`}>
-                <div className="card-header">
-                  <TrendingUp size={16} className="card-icon" />
-                  <span className="card-label">{card.label}</span>
+            <div className="contract-display">
+              <span className="ca-label">CA:</span>
+              <button className="ca-copy-btn" onClick={handleCopyCA}>
+                <span className="ca-value">{CONTRACT_ADDRESS}</span>
+                <Copy size={16} />
+                {copied && <span className="copied-feedback">COPIED</span>}
+              </button>
+            </div>
+
+            <div className="controls-section">
+                            <div className="token-selector">
+                <button className="token-btn" onClick={() => setDropdownOpen(!dropdownOpen)}>
+                  <span>{currentToken.symbol}</span>
+                  <ChevronDown size={16} />
+                </button>
+
+                {dropdownOpen && (
+                  <>
+                    <div
+                      className="dropdown-backdrop"
+                      onClick={() => setDropdownOpen(false)}
+                    />
+                    <div className="dropdown">
+                      <div className="dropdown-search">
+                        <Search size={16} />
+                        <input
+                          type="text"
+                          placeholder="Search any token..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          autoFocus
+                        />
+                      </div>
+                      <div className="dropdown-list">
+                        {searching && <div className="dropdown-loading">Searching...</div>}
+                        
+                        {!searching && displayTokens.length === 0 && searchQuery.length > 1 && (
+                          <div className="dropdown-empty">No tokens found</div>
+                        )}
+                        
+                        {!searching && displayTokens.map(token => (
+                          <button
+                            key={token.id}
+                            className="dropdown-item"
+                            onClick={() => {
+                              setCurrentToken(token);
+                              setDropdownOpen(false);
+                              setSearchQuery('');
+                              setSearchResults([]);
+                            }}
+                          >
+                            <span className="token-symbol">{token.symbol}</span>
+                            <span className="token-id">{token.name || token.id}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="price-display">
+                <div className="price">
+                  {priceData.price ? `$${Number(priceData.price).toLocaleString(undefined, { maximumFractionDigits: 6 })}` : '--'}
                 </div>
-                <div className="card-value">
-                  {card.fmt(data.value)}
-                </div>
-                <div className="card-unit">{card.unit}</div>
-                {data.delta != null && (
-                  <div className={`card-delta ${data.delta >= 0 ? 'positive' : 'negative'}`}>
-                    {data.delta >= 0 ? '+' : ''}{(data.delta * 100).toFixed(2)}%
+                {priceData.change != null && (
+                  <div className={`price-change ${priceData.change >= 0 ? 'positive' : 'negative'}`}>
+                    {priceData.change >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                    {priceData.change >= 0 ? '+' : ''}{priceData.change.toFixed(2)}%
                   </div>
                 )}
               </div>
-            );
-          })}
+
+              <button className="refresh-btn" onClick={() => fetchAndRenderAll(currentToken)} disabled={loading}>
+                <RefreshCw size={18} className={loading ? 'spinning' : ''} />
+              </button>
+            </div>
+          </header>
+
+          <main className="dashboard">
+            {signal && (
+              <div className={`signal-holo ${getSignalColor(signal.signal)}`}>
+                <div className="signal-glow" />
+                <div className="signal-icon">{getSignalIcon(signal.signal)}</div>
+                <div className="signal-content">
+                  <div className="signal-label">TRADING SIGNAL</div>
+                  <div className="signal-value glitch">{signal.signal}</div>
+                  <div className="signal-score">SCORE: {signal.score}</div>
+                  <div className="signal-reasons">
+                    {signal.signals.map((s, i) => (
+                      <div key={i} className="signal-reason"> {s}</div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="metrics-grid">
+              {CARD_DEFS.map(card => {
+                const data = cardData[card.key] || {};
+                return (
+                  <div key={card.key} className="metric-holo">
+                    <div className="holo-border" />
+                    <div className="card-header">
+                      <span className="card-label">{card.label}</span>
+                    </div>
+                    <div className="card-value">{card.fmt(data.value)}</div>
+                    <div className="card-unit">{card.unit}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="charts-grid">
+              <div className="chart-holo">
+                <div className="holo-border" />
+                <h3 className="chart-title">{currentToken.symbol}/USDT PRICE HISTORY</h3>
+                <div className="chart-wrapper"><canvas ref={canvasRefs.ohlc}></canvas></div>
+              </div>
+              <div className="chart-holo">
+                <div className="holo-border" />
+                <h3 className="chart-title">VOLUME HISTORY</h3>
+                <div className="chart-wrapper"><canvas ref={canvasRefs.volume}></canvas></div>
+              </div>
+              <div className="chart-holo">
+                <div className="holo-border" />
+                <h3 className="chart-title">TAKER BUY/SELL RATIO</h3>
+                <div className="chart-wrapper"><canvas ref={canvasRefs.buySell}></canvas></div>
+              </div>
+              <div className="chart-holo">
+                <div className="holo-border" />
+                <h3 className="chart-title">FEAR & GREED INDEX</h3>
+                <div className="chart-wrapper"><canvas ref={canvasRefs.fg}></canvas></div>
+              </div>
+              <div className="chart-holo">
+                <div className="holo-border" />
+                <h3 className="chart-title">FUNDING RATE HISTORY</h3>
+                <div className="chart-wrapper"><canvas ref={canvasRefs.funding}></canvas></div>
+              </div>
+            </div>
+          </main>
         </div>
-
-        <div className="charts-grid">
-          <div className="chart-container">
-            <h3 className="chart-title">{currentToken.symbol}/USDT PRICE HISTORY (OHLC)</h3>
-            <div className="chart-wrapper">
-              <canvas ref={canvasRefs.ohlc}></canvas>
-            </div>
-          </div>
-
-          <div className="chart-container">
-            <h3 className="chart-title">{currentToken.symbol} VOLUME HISTORY</h3>
-            <div className="chart-wrapper">
-              <canvas ref={canvasRefs.volume}></canvas>
-            </div>
-          </div>
-
-          <div className="chart-container">
-            <h3 className="chart-title">TAKER BUY RATIO (1H)</h3>
-            <div className="chart-wrapper">
-              <canvas ref={canvasRefs.buySell}></canvas>
-            </div>
-          </div>
-
-          <div className="chart-container">
-            <h3 className="chart-title">FEAR & GREED INDEX</h3>
-            <div className="chart-wrapper">
-              <canvas ref={canvasRefs.fg}></canvas>
-            </div>
-          </div>
-
-          <div className="chart-container">
-            <h3 className="chart-title">FUNDING RATE HISTORY</h3>
-            <div className="chart-wrapper">
-              <canvas ref={canvasRefs.funding}></canvas>
-            </div>
-          </div>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
